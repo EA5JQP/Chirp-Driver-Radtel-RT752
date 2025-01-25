@@ -14,6 +14,11 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+# TODO:
+# Define default values
+# Subdevices
+
+
 
 import logging
 import random
@@ -195,29 +200,6 @@ CMD_INIT_RADIO  = "5A335796ACBB"
 CMD_WRITE_RADIO = "5A4588795296"
 CMD_READ_RADIO  = "5A46998A6BA7"
 
-
-
-
-CMD_ARRAY_READ_RADIO = [
-    "5A46998A6BA7 00048000 0400 00005B2D", # 1
-    "5A46998A6BA7 00048400 0400 00005B31", # 2
-    "5A46998A6BA7 00048800 0400 00005B35", # 3
-    "5A46998A6BA7 00048C00 0400 00005B39", # 4
-    "5A46998A6BA7 00049000 0400 00005B3D", # 5
-    "5A46998A6BA7 00049400 0400 00005B41", # 6
-    "5A46998A6BA7 00049800 0400 00005B45", # 7
-    "5A46998A6BA7 00049C00 0361 00005BA9", # 8* This block contains only 26 channels
-    "5A46998A6BA7 0004A000 0400 00005B4D", # 9
-    "5A46998A6BA7 0004A400 0400 00005B51", # 10
-    "5A46998A6BA7 0004A800 0400 00005B55", # 11
-    "5A46998A6BA7 0004AC00 0400 00005B59", # 12
-    "5A46998A6BA7 0004B000 0400 00005B5D", # 13
-    "5A46998A6BA7 0004B400 0400 00005B61", # 14
-    "5A46998A6BA7 0004B800 0400 00005B65", # 15
-    "5A46998A6BA7 0004BC00 0361 00005BC9", # 16* This block contains only 26 channels
-    "5A46998A6BA7 00044000 0400 00005AED", # settings
-]
-
 BLOCK_CHANNEL_SIZE = 32 # 32 bytes per channel
 BUFFER_SIZE = 1024 
 BUFFER_SHORT_SIZE = 0x361
@@ -328,7 +310,7 @@ def _do_status(radio, block):
     status = chirp_common.Status()
     status.msg = "Cloning"
     status.cur = block
-    status.max = len(CMD_ARRAY_READ_RADIO)
+    status.max = 17 # There are 17 buffers to be read/written
     radio.status_fn(status)
 
 def _enter_programming_mode(radio, number_inits):
@@ -350,71 +332,87 @@ def _enter_programming_mode(radio, number_inits):
         else:
             LOG.debug("No response received after sending INIT.")
 
-def do_download(radio):
+def read_data(radio, addr, data_len):
     decoder = laiyc_encdec()
     decoder.debug = False
     decoder.verbose = False
-    
+
     radio.pipe.baudrate = radio.BAUD_RATE
     radio.pipe.timeout = radio.TIME_OUT
 
+    # Convert integers to hex strings (assuming addr and data are integers)
+    addr_hex = hex(addr)[2:].zfill(8)  # Remove '0x' prefix and zero-pad to 6 digits
+    data_len = hex(data_len)[2:].zfill(4)  # Zero-pad to 4 digits
+    cmd = generate_cmd(decoder, CMD_READ_RADIO, addr_hex, data_len, '')
+    LOG.info(cmd)
+
+    cmd_bytes = bytes.fromhex(cmd)
+    encrypted_cmd = decoder.encrypt_tx_buffer(cmd_bytes, seed=None)
+    if encrypted_cmd:  
+        radio.pipe.flushInput()
+        radio.pipe.write(encrypted_cmd)
+    else:
+        LOG.debug("Error: Decoder returned no data when encrypting tx buffer.")
+
+    encrypted_rx_buffer = radio.pipe.read(2070)
+
+    if encrypted_rx_buffer:
+        decrypted_rx_buffer = decoder.decrypt_rx_buffer(encrypted_rx_buffer)
+        if decrypted_rx_buffer:
+            # LOG.debug("Received response: {}".format(decrypted_rx_buffer))
+            decrypted_rx_data = decoder.decrypt_rx_data(decrypted_rx_buffer)
+            if decrypted_rx_data:
+                return decrypted_rx_data
+            else:
+                LOG.debug("Error: Decoder returned no data when decoding rx data.")
+                return None
+        else:
+            LOG.debug("Error: Decoder returned no data when decoding rx buffer.")
+            return None
+    else:
+        LOG.debug("No response received.")
+        return None     
+
+def do_download(radio):
     _enter_programming_mode(radio, NUMBER_INITS_FOR_DOWNLOAD)
-    
+
     blocks =b"" # Initialize data buffer     
     block_idx = 0 # Initialize block index
 
-    LOG.debug("Downloading data...")
-
-    for buf_idx, cmd in enumerate(CMD_ARRAY_READ_RADIO):
+    for buf_idx, buf_addr in enumerate(range(START_ADDR_CHANNELS, END_ADDR_CHANNELS+BUFFER_SIZE, BUFFER_SIZE)):
         _do_status(radio, buf_idx)
-
-        cmd_bytes = bytes.fromhex(cmd)
-        encrypted_cmd = decoder.encrypt_tx_buffer(cmd_bytes, seed=None)
-        if encrypted_cmd:  
-            radio.pipe.flushInput()
-            radio.pipe.write(encrypted_cmd)
-        else:
-            LOG.debug("Error: Decoder returned no data when encrypting tx buffer.")
-
-        encrypted_rx_buffer = radio.pipe.read(2070)
-        # LOG.debug("RX Buffer: {}".format(encrypted_rx_buffer.hex()))         
-        
-        if encrypted_rx_buffer:
-            decrypted_rx_buffer = decoder.decrypt_rx_buffer(encrypted_rx_buffer)
-            if decrypted_rx_buffer:
-                # LOG.debug("Received response: {}".format(decrypted_rx_buffer))
-                decrypted_rx_data = decoder.decrypt_rx_data(decrypted_rx_buffer)
-                if decrypted_rx_data:
-                    for i in range(0, len(decrypted_rx_data), BLOCK_CHANNEL_SIZE):
-                        LOG.debug("Extracting from {}".format(i))
-                        # Skip iteration if channel is VFO A or VFO B 
-                        if block_idx == BLOCK_NUMBER_VFOA or block_idx == BLOCK_NUMBER_VFOB:
-                            LOG.debug("Skipping block {} because is VFO A or VFO B channel.".format(block_idx))
-                            block_idx += 1
-                            continue
-                        block = decrypted_rx_data[i:i+BLOCK_CHANNEL_SIZE]
-                        LOG.debug("Block size is: {}".format(len(block)))
-                        # Skip iteration if block size is less than expected
-                        if len(block) < BLOCK_CHANNEL_SIZE:
-                            LOG.debug("Error: Block size is less than expected.")
-                            continue
-                        else:
-                            LOG.info("Buffer: %i Block: %i",buf_idx, block_idx)
-                            LOG.info(util.hexprint(bytes(block)))
-                            blocks += bytes(block)
-                            block_idx += 1 
-                else:
-                    LOG.debug("Error: Decoder returned no data when decoding rx data.")
-                    LOG.debug("RX Data: {}".format(decrypted_rx_data.hex()))
+        data_len = BUFFER_SHORT_SIZE if buf_addr in SHORT_ADDRS else BUFFER_SIZE
+        data = read_data(radio, buf_addr, data_len)
+        if not data:
+            LOG.error("No data received")
+        for i in range(0, len(data), BLOCK_CHANNEL_SIZE):
+            LOG.debug("Extracting from {}".format(i))
+            # Skip iteration if channel is VFO A or VFO B 
+            if block_idx == BLOCK_NUMBER_VFOA or block_idx == BLOCK_NUMBER_VFOB:
+                LOG.debug("Skipping block {} because is VFO A or VFO B channel.".format(block_idx))
+                block_idx += 1
+                continue
+            block = data[i:i+BLOCK_CHANNEL_SIZE]
+            LOG.debug("Block size is: {}".format(len(block)))
+            # Skip iteration if block size is less than expected
+            if len(block) < BLOCK_CHANNEL_SIZE:
+                LOG.debug("Error: Block size is less than expected.")
+                continue
             else:
-                LOG.debug("Error: Decoder returned no data when decoding rx buffer.")
-        else:
-            LOG.debug("No response received.")     
-    
+                LOG.info("Buffer: %i Block: %i",buf_idx, block_idx)
+                LOG.info(util.hexprint(bytes(block)))
+                blocks += bytes(block)
+                block_idx += 1 
+
+    # Setting data is 
+    LOG.info("Buffer: %i Block: %i",buf_idx, block_idx)
+    LOG.info(util.hexprint(bytes(blocks)))
+    blocks += read_data(radio, START_ADDR_SETTINGS, BUFFER_SIZE)
     _enter_programming_mode(radio, NUMBER_INITS_FOR_STOP)
-    LOG.debug("Encrypted data: {}".format(util.hexprint(blocks)))
-    LOG.debug("Total blocks: {}".format(block_idx))
+    LOG.info(util.hexprint(bytes(blocks)))
+
     return memmap.MemoryMapBytes(blocks)   
+
 
 def write_data(radio, data, addr): 
     decoder = laiyc_encdec()
@@ -433,14 +431,8 @@ def write_data(radio, data, addr):
     LOG.debug("Data length: {}".format(data_len))
 
     cmd = generate_cmd(decoder, CMD_WRITE_RADIO, addr_hex, data_len, data_hex)
-
-    # Combine strings and encode them as bytes using an appropriate encoding
-    cmd = CMD_WRITE_RADIO + addr_hex + data_len + data_hex
     cmd_bytes = bytes.fromhex(cmd)  # Explicitly convert to bytes
-    checksum = decoder.calculate_checksum(cmd_bytes)
-    LOG.debug("Checksum: {}".format(checksum.hex().upper()))
-
-    encoded_cmd = decoder.encrypt_tx_buffer(cmd_bytes + checksum, seed=None)
+    encoded_cmd = decoder.encrypt_tx_buffer(cmd_bytes, seed=None)
 
     LOG.debug("Sending command: {}".format((cmd)))
     radio.pipe.write(encoded_cmd)
@@ -450,7 +442,7 @@ def write_data(radio, data, addr):
             LOG.debug("Received response: {}".format(decoded_rcv_buf))
 
 def do_upload(radio):
-    """This is your download settings function"""
+
     _enter_programming_mode(radio, NUMBER_INITS_FOR_UPLOAD)
 
     LOG.debug("Uploading...")
@@ -468,17 +460,15 @@ def do_upload(radio):
 
         buffer = radio.get_mmap()[buff_idx * buffer_size: (buff_idx + 1 ) * buffer_size]
 
-        LOG.debug("writemem sent data addr=0x%4.4x len=0x%4.4x:\n%s" %
-            (buff_addr, len(buffer), util.hexprint(buffer)))
+        # LOG.debug("writemem sent data addr=0x%4.4x len=0x%4.4x:\n%s" %
+        #     (buff_addr, len(buffer), util.hexprint(buffer)))
         write_data(radio, buffer, buff_addr)
 
     # Settings in a separate and non-consecutive address, thus cannot be handled in the loop
-    # TODO: 16000 is the position of the setting data in mmap. This can be obtained from previous operations.
-    buffer_set = radio.get_mmap()[16000: 16000 + BUFFER_SIZE]    
-    LOG.info("end of channel buffer is: {}".format((buff_idx+1) * buffer_size))
+    buffer_set = radio.get_mmap()[BLOCK_CHANNEL_SIZE*MAX_CHANNELS: BLOCK_CHANNEL_SIZE*MAX_CHANNELS + BUFFER_SIZE]    
     write_data(radio, buffer_set, START_ADDR_SETTINGS)
-    LOG.debug("writemem sent data addr=0x%4.4x len=0x%4.4x:\n%s" %
-            (START_ADDR_SETTINGS, len(buffer_set), util.hexprint(buffer_set)))
+    # LOG.debug("writemem sent data addr=0x%4.4x len=0x%4.4x:\n%s" %
+    #         (START_ADDR_SETTINGS, len(buffer_set), util.hexprint(buffer_set)))
     
     _enter_programming_mode(radio, NUMBER_INITS_FOR_STOP)
 
@@ -836,7 +826,6 @@ class rt752(chirp_common.CloneModeRadio):
         rf.valid_tuning_steps = TUNING_STEPS
 
         return rf
- 
  
     # Do a download of the radio from the serial port
     def sync_in(self):
@@ -1357,8 +1346,6 @@ class rt752(chirp_common.CloneModeRadio):
         rs = RadioSettingValueList(LONGKEYASSIGN_LIST, current_index = _mem.settings.long_press_key2)
         rset = RadioSetting("long_press_key2", "Long Press Side Key 2", rs)
         key.append(rset)
-
-        LOG.info(_mem.settings)
 
         
         return group
