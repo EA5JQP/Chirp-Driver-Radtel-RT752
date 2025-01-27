@@ -14,9 +14,6 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-# TODO:
-# Define default values
-# Subdevices
 
 
 
@@ -51,7 +48,7 @@ struct {
        bcl_carrier:1,           //          - BCL is OFF by default. 1=Carrier
        signaltype_2tone:1,	    //          - Signal Type is NONE by default 1=2-Tone
        signaltype_dtmf:1,	    //          - Signal Type is NONE by default 1=DTMF
-       unknown2:1;              //          - Unknown
+       rev_freq:1;              //          - Unknown
     u8 vox:1,                   // byte[1]  - VOX activation 0=OFF 1=ACTIVE
        unknown3:1,              //          - Unknown	            
        txpower:1,               //          - TX Power 0=Low 1=High	
@@ -63,7 +60,7 @@ struct {
        unknown5:1,           	
        unknown6:1,          	
        hoppwd:1,
-       scan:1,                   	
+       enablescan:1,                   	
        compand:1,                   	
        scramble:1,                    	
        unknown7:1;                	
@@ -113,8 +110,8 @@ struct{
     u8 low_batt_alarm;              
     u8 power_on_tone;               
     u8 an_power_on;                 
-    u8 keylock;                     
-    u8 unknown;                     
+    u8 keylockmode;                     
+    u8 keylocked;                     
     u8 unknown;                     
     u8 step;                        
 
@@ -244,6 +241,7 @@ SKIP_VALUES = ["S", ""]
 SQUELCH_LIST = [f'{x}' for x in range(0, 10)]
 BACKLIGHT_LIST = ["On", "Off", "Auto 5s", "Auto 10s", "Auto 20s", "Auto 30s", "Auto 60s"]
 GROUPMODE_LIST = ["VFO Mode", "CH + VFO Mode", "CH Mode"]
+REVFREQ_LIST = OFF_ON_LIST
 
 TOT_LIST = ["Off", "15s", "30s", "45s", "60s", "75s", "90s", "105s", "120s", "135s", "150s", "165s", "180s", "195s", "210s", "225s", "240s", "255s", "270s"]
 LANGUAGE_LIST = ["English", "Chinese"]
@@ -254,9 +252,11 @@ STEP_LIST = ["0.05kHz", "0.25kHz", "2.5kHz", "5kHz", "6.25kHz", "10kHz", "12.5kH
 VOICE_LIST = ["None", "Chinese", "English"]
 LOWBATTTONE_LIST = ["Off", "Tone-1", "Tone-2"]
 LOWBATTINTERVAL_LIST = ['None' if x == 0 else f'{x}s' for x in range(0, 502, 2)]
-PON_LIST = ["Off" if x == 0 else f'Tone-{x}' for x in range(0,8)]
+PONTONE_LIST = ["Off" if x == 0 else f'Tone-{x}' for x in range(0,8)]
+PONPIC_LIST = ["Show Picture", "DC Voltage", "Show Message"]
 VIBRATIONINT_LIST = [f'{x}min' for x in range(1,11)]
 VIBRATIONTIME_LIST = [f'{x}s' for x in range(1,11)]
+KEYLOCKMODE_LIST = ["Manual", "Auto-5s", "Auto-10s", "Auto-20s", "Auto-30s", "Auto+Save-5s", "Auto+Save-10s", "Auto+Save-20s", "Auto+Save-30s"]
 
 SCANTXMODE_LIST = ["Selected Channel", "Final Active Channel", "Fixed Channel"]
 GROUPSELECT_LIST = ["None" if x == 0 else f'{x}' for x in range(0,251)]
@@ -324,7 +324,7 @@ def _enter_programming_mode(radio, number_inits):
     for _ in range(0, number_inits):
         radio.pipe.flushInput()
         radio.pipe.write(encrypted_cmd)
-        LOG.debug("Sending init command {}".format(CMD_INIT_RADIO))
+        # LOG.debug("Sending init command {}".format(CMD_INIT_RADIO))
         encrypted_response = radio.pipe.read(6)
         if encrypted_response:
             decoded_rcv_buf = decoder.decrypt_rx_buffer(encrypted_response)
@@ -413,7 +413,6 @@ def do_download(radio):
 
     return memmap.MemoryMapBytes(blocks)   
 
-
 def write_data(radio, data, addr): 
     decoder = laiyc_encdec()
     decoder.debug = False
@@ -434,7 +433,7 @@ def write_data(radio, data, addr):
     cmd_bytes = bytes.fromhex(cmd)  # Explicitly convert to bytes
     encoded_cmd = decoder.encrypt_tx_buffer(cmd_bytes, seed=None)
 
-    LOG.debug("Sending command: {}".format((cmd)))
+    # LOG.debug("Sending command: {}".format((cmd)))
     radio.pipe.write(encoded_cmd)
     encrypted_response = radio.pipe.read(550)
     if encrypted_response:
@@ -546,23 +545,38 @@ def encode_tone(tone_type, value, polarity=None):
 
     return None
 
-def append_label(radio_setting, label, descr=""):
-    """
-    Appends a labeled radio setting to a given radio setting list.
+def format_string(string, total_length):
 
-    This function creates a `RadioSetting` object with a unique label, 
-    associates it with a description, and appends it to the provided 
-    `radio_setting` list. The `append_label` function maintains an 
-    internal counter to ensure unique label names.
-    """
-    if not hasattr(append_label, 'idx'):
-        append_label.idx = 0
+    # Strip extra spaces and calculate padding to center the string
+    stripped = string.strip()
+    padding = (total_length - len(stripped)) // 2
+    formatted_string = f"{padding * ' '}{stripped}{(total_length - len(stripped) - padding) * ' '}"
+    return formatted_string
 
-    val = RadioSettingValueString(len(descr), len(descr), descr)
-    val.set_mutable(False)
-    rs = RadioSetting("label" + str(append_label.idx), label, val)
-    append_label.idx += 1
-    radio_setting.append(rs)
+def pad_string(text, length):
+    """
+    Pads a string with spaces to reach a specified length.
+
+    Args:
+        text: The string to pad.
+        length: The desired total length of the padded string.
+
+    Returns:
+        The padded string, or the original string if its length is already
+        greater than or equal to the desired length. Returns an error message
+        if length is negative.
+    """
+
+    if length < 0:
+        return "Error: Length cannot be negative."
+
+    padding_length = length - len(text)
+
+    if padding_length > 0:
+        padded_string = text + " " * padding_length
+        return padded_string
+    else:
+        return text  # No padding needed
 
 class laiyc_encdec(object):
 	debug = False
@@ -811,6 +825,8 @@ class rt752(chirp_common.CloneModeRadio):
         rf.has_rx_dtcs = True
         rf.has_ctone = True
         rf.has_comment = False
+        rf.has_mode = False
+
 
         rf.memory_bounds = (1, self._upper)
         rf.valid_tmodes = ["", "Tone", "TSQL", "DTCS", "Cross"]
@@ -873,8 +889,9 @@ class rt752(chirp_common.CloneModeRadio):
             # LOG.info("Channel %i is empty!",number)
             return mem
         
-        mem.skip = SKIP_VALUES[_mem.scan]      
-
+        # Negate scan to get skip
+        mem.skip = SKIP_VALUES[_mem.enablescan]
+   
         mem.freq = int(_mem.rxfreq) * 10
         txfreq = int(_mem.txfreq) * 10
 
@@ -983,7 +1000,12 @@ class rt752(chirp_common.CloneModeRadio):
             spku = 0
         rs = RadioSettingValueList(SPEAKERUNMUTE_LIST, current_index = spku)
         rset = RadioSetting("spku", "Speaker Unmute", rs)
-        mem.extra.append(rset)        
+        mem.extra.append(rset)
+
+        # REVERSE FREQUENCY
+        rs = RadioSettingValueList(REVFREQ_LIST, current_index = _mem.rev_freq)
+        rset = RadioSetting("rev_freq", "Rev Freq", rs)
+        mem.extra.append(rset) 
 
         msgs = self.validate_memory(mem)
 
@@ -1000,10 +1022,47 @@ class rt752(chirp_common.CloneModeRadio):
         LOG.info("Memory Map")
         LOG.info(self.process_mmap())
 
+        if _mem.get_raw(asbytes=False)[0] == "\xff":
+            _mem.set_raw("\xFF" * BLOCK_CHANNEL_SIZE)
+            _mem.vox = 0
+            _mem.bandwidth = 0
+            _mem.bcl_qt_dqt = 0
+            _mem.bcl_carrier = 0
+            _mem.compand = 0
+            _mem.deg = 0
+            _mem.dig = 0
+            _mem.hoppwd = 0
+            _mem.pttid = 0
+            _mem.random = 0
+            _mem.scramble = 0
+            _mem.spku_and = 0
+            _mem.spku_or = 0
+            _mem.vox = 0
+            _mem.signaltype_2tone = 0
+            _mem.signaltype_dtmf = 0
+            _mem.rev_freq = 0
+            _mem.unknown1
+            _mem.unknown3=0
+            _mem.unknown4=0
+            _mem.unknown5=0
+            _mem.unknown6=0
+            _mem.unknown7=0
+            _mem.unknown8=0
+            _mem.unknown9=0
+            _mem.unknown10=0
+            _mem.unknown11=0
+            _mem.unknown12=0
+            _mem.unknown13=0
+            _mem.unknown14=0
+            _mem.unknown15=0
+            _mem.unknown16=0
+
         # if empty memory
         if mem.empty:
             _mem.set_raw("\xFF" * BLOCK_CHANNEL_SIZE)
+            _mem.vox = 0
             return
+            
         _mem.rxfreq = int(mem.freq) / 10 
 
         if mem.duplex == "split":
@@ -1015,7 +1074,7 @@ class rt752(chirp_common.CloneModeRadio):
         else:
             _mem.txfreq = mem.freq / 10
 
-        _mem.skip = 0 if mem.scan == "No" else 0
+        _mem.enablescan = SKIP_VALUES.index(mem.skip)
 
         _mem.name = mem.name.rstrip('\xFF').ljust(12, '\x20')
 
@@ -1027,23 +1086,22 @@ class rt752(chirp_common.CloneModeRadio):
         if rxtone != None:
             _mem.rxtone = int(encode_tone(rxmode, rxtone, rxpol))
 
-        _mem.txpower = POWER_LEVELS.index(mem.power)
+        _mem.txpower = 0 if mem.power is None else POWER_LEVELS.index(mem.power)
 
         #extra
         for element in mem.extra:
             sname  = element.get_name()
             svalue = element.value.get_value()
-
             if sname == 'bandwidth':
                 _mem.bandwidth = 1 if element.value=="Wide" else 0
-
             # BCL
             if sname == 'bcl':
                 _mem.bcl_qt_dqt = 1 if element.value=="QT/DQT" else 0
                 _mem.bcl_carrier = 1 if element.value=="Carrier" else 0
             # VOX
             if sname == 'vox':
-                _mem.vox = 1 if element.value=="On" else 0            
+                # _mem.vox = 1 if element.value=="On" else 0  
+                _mem.vox = 0 if element.value is None else element.value
             # SCRAMBLE
             if sname == 'scramble':
                 _mem.scramble = 1 if element.value=="On" else 0  
@@ -1072,7 +1130,12 @@ class rt752(chirp_common.CloneModeRadio):
             # SPEAKERUNMUTE
             if sname == 'spku':
                 _mem.spku_and = 1 if element.value=="QT/DQT AND Signal" else 0
-                _mem.spku_or = 1 if element.value=="QT/DQT OR Signal" else 0    
+                _mem.spku_or = 1 if element.value=="QT/DQT OR Signal" else 0 
+            # REVERSE FREQUENCY 
+            if sname == "rev_freq":
+                _mem.rev_freq = 1 if element.value=="On" else 0
+
+
 
         return mem
     
@@ -1118,27 +1181,27 @@ class rt752(chirp_common.CloneModeRadio):
             return s_
 
         pon_msg1= ''.join(filter(_mem.settings.pon_msg1)).rstrip()
-        rs = RadioSettingValueString(0,16, pon_msg1, autopad= False)
+        rs = RadioSettingValueString(0,16, pon_msg1, autopad= True)
         rset = RadioSetting("pon_msg1", "Power On Message 1", rs)
         info.append(rset)
 
         pon_msg2= ''.join(filter(_mem.settings.pon_msg2)).rstrip()
-        rs = RadioSettingValueString(0,16, pon_msg2, autopad= False)
+        rs = RadioSettingValueString(0,16, pon_msg2, autopad= True)
         rset = RadioSetting("pon_msg2", "Power On Message 2", rs)
         info.append(rset)
 
         pon_msg3= ''.join(filter(_mem.settings.pon_msg3)).rstrip()
-        rs = RadioSettingValueString(0,16, pon_msg3, autopad= False)
+        rs = RadioSettingValueString(0,16, pon_msg3, autopad= True)
         rset = RadioSetting("pon_msg3", "Power On Message 3", rs)
         info.append(rset)
 
         msg1= ''.join(filter(_mem.settings.msg1)).rstrip()
-        rs = RadioSettingValueString(0,16, msg1, autopad= False)
+        rs = RadioSettingValueString(0,16, msg1, autopad= True)
         rset = RadioSetting("msg1", "Message 1", rs)
         info.append(rset)
 
         msg2= ''.join(filter(_mem.settings.msg2)).rstrip()
-        rs = RadioSettingValueString(0,16, msg2, autopad= False)
+        rs = RadioSettingValueString(0,16, msg2, autopad= True)
         rset = RadioSetting("msg2", "Message 2", rs)
         info.append(rset)
 
@@ -1182,8 +1245,12 @@ class rt752(chirp_common.CloneModeRadio):
         rset = RadioSetting("batt_save_ratio", "Battery Save Ratio", rs)
         basic.append(rset) 
 
-        rs = RadioSettingValueList(PON_LIST, current_index = _mem.settings.power_on_tone)
+        rs = RadioSettingValueList(PONTONE_LIST, current_index = _mem.settings.power_on_tone)
         rset = RadioSetting("power_on_tone", "Power On Tone", rs)
+        basic.append(rset) 
+
+        rs = RadioSettingValueList(PONPIC_LIST, current_index = _mem.settings.power_on_pic)
+        rset = RadioSetting("power_on_pic", "Power On Picture", rs)
         basic.append(rset) 
 
         rs = RadioSettingValueList(VOXLEVEL_LIST, current_index = _mem.settings.vox_level)
@@ -1230,8 +1297,12 @@ class rt752(chirp_common.CloneModeRadio):
         rset = RadioSetting("low_batt_alarm_int", "Low Battery Alarm Interval", rs)
         basic.append(rset) 
 
-        rs = RadioSettingValueBoolean(bool(_mem.settings.keylock))
-        rset = RadioSetting("keylock", "Key Locked", rs)
+        rs = RadioSettingValueList(KEYLOCKMODE_LIST, current_index = _mem.settings.keylockmode)
+        rset = RadioSetting("keylockmode", "Key Lock Mode", rs)
+        basic.append(rset) 
+
+        rs = RadioSettingValueBoolean(bool(_mem.settings.keylocked))
+        rset = RadioSetting("keylocked", "Key Locked", rs)
         basic.append(rset) 
 
         rs = RadioSettingValueBoolean(bool(_mem.settings.an_power_on))
@@ -1359,11 +1430,36 @@ class rt752(chirp_common.CloneModeRadio):
             if not isinstance(element, RadioSetting):
                 self.set_settings(element)
                 continue
-        
-        # Basic Settings        
+
+        #################
+        # Info Settings #
+        #################
+            if element.get_name() == "range_freq_a_start":
+                _settings.range_freq_a_start = element.value * 10  
+            if element.get_name() == "range_freq_a_end":
+                _settings.range_freq_a_end = element.value * 10 
+            if element.get_name() == "range_freq_b_start":
+                _settings.range_freq_b_start = element.value * 10 
+            if element.get_name() == "range_freq_b_end":
+                _settings.range_freq_b_end = element.value * 10
+            if element.get_name() == "pon_msg1":
+                _settings.pon_msg1 = format_string(str(element.value),16)
+            if element.get_name() == "pon_msg2":
+                _settings.pon_msg2 = format_string(str(element.value),16)
+            if element.get_name() == "pon_msg3":
+                _settings.pon_msg3 = format_string(str(element.value),16)
+            if element.get_name() == "msg1":
+                _settings.msg1 = format_string(str(element.value),16)
+            if element.get_name() == "msg2":
+                _settings.msg2 = format_string(str(element.value),16)
+
+
+             
+        ##################
+        # Basic Settings #
+        ##################        
             if element.get_name() == "squelch":
                 _settings.squelch = SQUELCH_LIST.index(str(element.value))
-                LOG.info(_settings)
             if element.get_name() == "step":
                 _settings.step = STEP_LIST.index(str(element.value))
             if element.get_name() == "backlight":
@@ -1381,5 +1477,90 @@ class rt752(chirp_common.CloneModeRadio):
             if element.get_name() == "batt_save_ratio":
                 _settings.batt_save_ratio = BATTSAVE_LIST.index(str(element.value))
             if element.get_name() == "power_on_tone":
-                _settings.power_on_tone = PON_LIST.index(str(element.value))            
-            
+                _settings.power_on_tone = PONTONE_LIST.index(str(element.value))
+            if element.get_name() == "power_on_pic":
+                _settings.power_on_pic = PONPIC_LIST.index(str(element.value))          
+            if element.get_name() == "vox_level":
+                _settings.vox_level = VOXLEVEL_LIST.index(str(element.value))  
+            if element.get_name() == "vox_delay":
+                _settings.vox_delay = VOXDELAY_LIST.index(str(element.value))           
+            if element.get_name() == "tone":
+                _settings.tone = element.value and 1 or 0          
+            if element.get_name() == "standby_light":
+                _settings.standby_light = element.value and 1 or 0            
+            if element.get_name() == "jump_freq":
+                _settings.jump_freq = element.value and 1 or 0 
+            if element.get_name() == "ch_name_show":
+                _settings.ch_name_show = element.value and 1 or 0    
+            if element.get_name() == "double_watch":
+                _settings.double_watch = element.value and 1 or 0    
+            if element.get_name() == "tx_end_tone":
+                _settings.tx_end_tone = element.value and 1 or 0    
+            if element.get_name() == "low_batt_alarm":
+                _settings.low_batt_alarm = element.value and 1 or 0    
+            if element.get_name() == "low_batt_tone":
+                _settings.low_batt_tone = LOWBATTTONE_LIST.index(str(element.value))
+            if element.get_name() == "low_batt_alarm_int":
+                _settings.low_batt_alarm_int = LOWBATTINTERVAL_LIST.index(str(element.value))
+            if element.get_name() == "keylockmode":
+                _settings.keylockmode = KEYLOCKMODE_LIST.index(str(element.value))
+            if element.get_name() == "keylocked":
+                _settings.keylocked = element.value and 1 or 0 
+            if element.get_name() == "an_power_on":
+                _settings.an_power_on = element.value and 1 or 0
+            if element.get_name() == "vibration":
+                _settings.vibration = element.value and 1 or 0
+            if element.get_name() == "vibration_interval":
+                _settings.vibration_interval = VIBRATIONINT_LIST.index(str(element.value))
+            if element.get_name() == "vibration_time":
+                _settings.vibration_time = VIBRATIONTIME_LIST.index(str(element.value))
+            if element.get_name() == "double_ptt":
+                _settings.double_ptt = element.value and 1 or 0
+            if element.get_name() == "call_tone":
+                _settings.call_tone = element.value and 1 or 0   
+            if element.get_name() == "denoise":
+                _settings.denoise = element.value and 1 or 0   
+            if element.get_name() == "disable_menu":
+                _settings.disable_menu = element.value and 1 or 0   
+            if element.get_name() == "airband":
+                _settings.airband = element.value and 1 or 0   
+            if element.get_name() == "freq_hop_ena":
+                _settings.freq_hop_ena = element.value and 1 or 0
+            if element.get_name() == "freq_hop_pwd":
+                _settings.freq_hop_pwd = element.value       
+            if element.get_name() == "freq_sig_src":
+                _settings.freq_sig_src = element.value and 1 or 0                                      
+            if element.get_name() == "freq_meas":
+                _settings.freq_meas = element.value and 1 or 0  
+
+        #################
+        # Scan Settings #
+        #################
+            if element.get_name() == "scan_tx_mode":
+                _settings.scan_tx_mode = SCANTXMODE_LIST.index(str(element.value))
+            if element.get_name() == "sel_ch_group_a":
+                _settings.sel_ch_group_a = GROUPSELECT_LIST.index(str(element.value))
+            if element.get_name() == "sel_ch_group_b":
+                _settings.sel_ch_group_b = GROUPSELECT_LIST.index(str(element.value))
+            if element.get_name() == "prio_ch_group_a":
+                _settings.vibration_time = GROUPSELECT_LIST.index(str(element.value))
+            if element.get_name() == "prio_ch_group_b":
+                _settings.vibration_time = GROUPSELECT_LIST.index(str(element.value))
+            if element.get_name() == "talkback":
+                _settings.talkback = element.value and 1 or 0
+            if element.get_name() == "include_curr_fix_ch":
+                _settings.include_curr_fix_ch = element.value and 1 or 0
+
+        #################
+        # Scan Settings #
+        #################
+            if element.get_name() == "long_key_time":
+                _settings.long_key_time = LONGPRESSTIME_LIST.index(str(element.value))
+            if element.get_name() == "short_press_key1":
+                _settings.short_press_key1 = SHORTKEYASSIGN_LIST.index(str(element.value))
+            if element.get_name() == "long_press_key1":
+                _settings.long_press_key1 = LONGKEYASSIGN_LIST.index(str(element.value))
+            if element.get_name() == "short_press_key2":
+                _settings.short_press_key2 = SHORTKEYASSIGN_LIST.index(str(element.value))
+            if element.get_name() == "long_press_key2":
+                _settings.long_press_key2 = LONGKEYASSIGN_LIST.index(str(element.value))
