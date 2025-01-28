@@ -545,38 +545,22 @@ def encode_tone(tone_type, value, polarity=None):
 
     return None
 
-def format_string(string, total_length):
+def pad_string(original_string, length):
+    # Remove trailing spaces from the original string
+    trimmed_string = original_string.rstrip()
+    
+    # Calculate the number of padding characters needed
+    padding_length = length - len(trimmed_string)
+    
+    # If the trimmed string is already longer than the desired length, return it as is
+    if padding_length <= 0:
+        return trimmed_string
+    
+    # Pad the trimmed string with `FF` (ASCII 255) characters
+    padded_string = trimmed_string + chr(255) * padding_length
+    
+    return padded_string
 
-    # Strip extra spaces and calculate padding to center the string
-    stripped = string.strip()
-    padding = (total_length - len(stripped)) // 2
-    formatted_string = f"{padding * ' '}{stripped}{(total_length - len(stripped) - padding) * ' '}"
-    return formatted_string
-
-def pad_string(text, length):
-    """
-    Pads a string with spaces to reach a specified length.
-
-    Args:
-        text: The string to pad.
-        length: The desired total length of the padded string.
-
-    Returns:
-        The padded string, or the original string if its length is already
-        greater than or equal to the desired length. Returns an error message
-        if length is negative.
-    """
-
-    if length < 0:
-        return "Error: Length cannot be negative."
-
-    padding_length = length - len(text)
-
-    if padding_length > 0:
-        padded_string = text + " " * padding_length
-        return padded_string
-    else:
-        return text  # No padding needed
 
 class laiyc_encdec(object):
 	debug = False
@@ -913,7 +897,7 @@ class rt752(chirp_common.CloneModeRadio):
             mem.offset = 0
         else:
             mem.duplex = int(mem.freq) > txfreq and "-" or "+"
-            mem.offset = abs(int(mem.freq) - txfreq) * 10
+            mem.offset = abs(int(mem.freq) - txfreq)
 
         # Extra 
         mem.extra = RadioSettingGroup("Extra", "extra")
@@ -1060,7 +1044,6 @@ class rt752(chirp_common.CloneModeRadio):
         # if empty memory
         if mem.empty:
             _mem.set_raw("\xFF" * BLOCK_CHANNEL_SIZE)
-            _mem.vox = 0
             return
             
         _mem.rxfreq = int(mem.freq) / 10 
@@ -1180,7 +1163,10 @@ class rt752(chirp_common.CloneModeRadio):
                 s_ += (c if c in chirp_common.CHARSET_ASCII else "")
             return s_
 
+        LOG.info(_mem.settings.pon_msg1)
+        LOG.info(filter(_mem.settings.pon_msg1))        
         pon_msg1= ''.join(filter(_mem.settings.pon_msg1)).rstrip()
+        LOG.info(pon_msg1)
         rs = RadioSettingValueString(0,16, pon_msg1, autopad= True)
         rset = RadioSetting("pon_msg1", "Power On Message 1", rs)
         info.append(rset)
@@ -1443,15 +1429,15 @@ class rt752(chirp_common.CloneModeRadio):
             if element.get_name() == "range_freq_b_end":
                 _settings.range_freq_b_end = element.value * 10
             if element.get_name() == "pon_msg1":
-                _settings.pon_msg1 = format_string(str(element.value),16)
+                _settings.pon_msg1 = pad_string(str(element.value),16)
             if element.get_name() == "pon_msg2":
-                _settings.pon_msg2 = format_string(str(element.value),16)
+                _settings.pon_msg2 = pad_string(str(element.value),16)
             if element.get_name() == "pon_msg3":
-                _settings.pon_msg3 = format_string(str(element.value),16)
+                _settings.pon_msg3 = pad_string(str(element.value),16)
             if element.get_name() == "msg1":
-                _settings.msg1 = format_string(str(element.value),16)
+                _settings.msg1 = pad_string(str(element.value),16)
             if element.get_name() == "msg2":
-                _settings.msg2 = format_string(str(element.value),16)
+                _settings.msg2 = pad_string(str(element.value),16)
 
 
              
