@@ -35,6 +35,8 @@ from chirp.settings import InvalidValueError, RadioSetting, RadioSettingGroup, \
 LOG = logging.getLogger(__name__)
 
 MEM_FORMAT = """
+#seekto 0x%X;
+#printoffset "this_is_memory";
 
 struct {
     lbcd rxfreq[4];             // byte[4]  - RX Frequency in 10Hz units 32 bit unsigned little endian
@@ -76,9 +78,10 @@ struct {
     u8 unknown16;           
 
     char name[12];              // byte[12] - ASCII channel name, unused characters should be null (0)
-} memory[500]; 
+} memory[251]; 
 
-
+#printoffset "this_is_settings";
+#seekto 16064;
 struct{
     u8 jump_freq;                   
     u8 standby_light;                   
@@ -92,16 +95,16 @@ struct{
     u8 group_a_mode;                
     u8 group_b_mode;                
     
-    #seekto 16013;                
+    #seekto 16077;                
     u8 ch_name_show;                
     u8 double_watch;                
     u8 tx_end_tone;                 
-    u8 language;                    
-    
-    #seekto 16021;
+    u8 language;  
+
+    #seekto 16085;
     u8 tone;                        
 
-    #seekto 16023;
+    #seekto 16087;
     u8 batt_save_ratio;              
     u8 radio_prio_tx;               
     u8 tot;                         
@@ -115,13 +118,13 @@ struct{
     u8 unknown;                     
     u8 step;                        
 
-    #seekto 16050;
+    #seekto 16114;
     u8 power_on_pic;                
     
-    #seekto 16064;
+    #seekto 16128;
     u8 long_key_time;               
     
-    #seekto 16068;
+    #seekto 16132;
     u8 scan_tx_mode;                
     u8 sel_ch_group_a;              
     u8 sel_ch_group_b;              
@@ -130,30 +133,30 @@ struct{
     u8 talkback;                    
     u8 include_curr_fix_ch;         
 
-    #seekto 16114;
+    #seekto 16178;
     lbcd range_freq_a_start[4];     
     lbcd range_freq_a_end[4];       
     lbcd range_freq_b_start[4];     
     lbcd range_freq_b_end[4];       
     
-    #seekto 16150;
+    #seekto 16214;
     u8 vibration;                   
     u8 vibration_time;              
     u8 vibration_interval;          
     u8 low_batt_tx;                 
     u8 double_ptt;                  
     
-    #seekto 16163;
+    #seekto 16195;
     u8 record;                      
 
     #seekto 16175;
     u8 call_tone;
 
-    #seekto 16192;
+    #seekto 16239;
     u8 disable_menu;
     u8 denoise;
 
-    #seekto 16198;
+    #seekto 16262;
     u8 unknown:1,
        unknown:1,
        freq_sig_src:1,
@@ -165,24 +168,24 @@ struct{
     u16 freq_hop_pwd;
     u8 freq_hop_ena; 
 
-    #seekto 16206;
+    #seekto 16270;
     u8 long_press_key2;
     u8 short_press_key2;
     u8 short_press_key1;
     u8 long_press_key1;
 
-    #seekto 16230;
+    #seekto 16294;
     u8 default_id;
 
-    #seekto 16235;
+    #seekto 16299;
     u8 vox_delay;
 
-    #seekto 16288;
+    #seekto 16352;
     char pon_msg1[16];
     char pon_msg2[16];
     char pon_msg3[16];
 
-    #seekto 16352;
+    #seekto 16416;
     char msg1[16];
     char msg2[16];
 
@@ -202,10 +205,9 @@ BUFFER_SIZE = 1024
 BUFFER_SHORT_SIZE = 0x361
 BUFFER_MAX_SIZE = 4118  
 
-BLOCK_NUMBER_VFOA = 250 # VFOs are stored as channels 
-BLOCK_NUMBER_VFOB = 501 # VFOs are stored as channels
+BLOCK_NUMBER_VFO = 251 # VFOs are stored as channels 
 
-MAX_CHANNELS = 500 # 250 A-channels + 1 VFO-A + 250 B-channels + 1 VFO-B
+MAX_CHANNELS = 250
 
 START_ADDR_CHANNELS = 0x48000
 END_ADDR_CHANNELS = 0x4BC00
@@ -220,10 +222,8 @@ INIT_ADDR_CHANNELS = 0x48000
 INIT_ADDR_SETTINGS = 0x1900
 
 SPECIALS = {
-        "VFOA": BLOCK_NUMBER_VFOA,
-        "VFOB": BLOCK_NUMBER_VFOB,
+        "VFO": BLOCK_NUMBER_VFO,
 }
-SPECIAL_CHANNELS = ['VFO-A', 'VFO-B']
 
 OFF_ON_LIST = ["Off", "On"]
 BCL_LIST = ["Off", "Carrier", "QT/DQT"]
@@ -239,7 +239,7 @@ DEGREE_LIST = ['Off', "120", "180", "240"]
 HOPPWD_LIST = OFF_ON_LIST
 SKIP_VALUES = ["S", ""]
 SQUELCH_LIST = [f'{x}' for x in range(0, 10)]
-BACKLIGHT_LIST = ["On", "Off", "Auto 5s", "Auto 10s", "Auto 20s", "Auto 30s", "Auto 60s"]
+BACKLIGHT_LIST = ["Off", "On", "Auto 5s", "Auto 10s", "Auto 20s", "Auto 30s", "Auto 60s"]
 GROUPMODE_LIST = ["VFO Mode", "CH + VFO Mode", "CH Mode"]
 REVFREQ_LIST = OFF_ON_LIST
 
@@ -324,7 +324,6 @@ def _enter_programming_mode(radio, number_inits):
     for _ in range(0, number_inits):
         radio.pipe.flushInput()
         radio.pipe.write(encrypted_cmd)
-        # LOG.debug("Sending init command {}".format(CMD_INIT_RADIO))
         encrypted_response = radio.pipe.read(6)
         if encrypted_response:
             decoded_rcv_buf = decoder.decrypt_rx_buffer(encrypted_response)
@@ -388,10 +387,10 @@ def do_download(radio):
         for i in range(0, len(data), BLOCK_CHANNEL_SIZE):
             LOG.debug("Extracting from {}".format(i))
             # Skip iteration if channel is VFO A or VFO B 
-            if block_idx == BLOCK_NUMBER_VFOA or block_idx == BLOCK_NUMBER_VFOB:
-                LOG.debug("Skipping block {} because is VFO A or VFO B channel.".format(block_idx))
-                block_idx += 1
-                continue
+            # if block_idx == BLOCK_NUMBER_VFO:
+            #     LOG.debug("Skipping block {} because is VFO A or VFO B channel.".format(block_idx))
+            #     block_idx += 1
+            #     continue
             block = data[i:i+BLOCK_CHANNEL_SIZE]
             LOG.debug("Block size is: {}".format(len(block)))
             # Skip iteration if block size is less than expected
@@ -409,7 +408,6 @@ def do_download(radio):
     LOG.info(util.hexprint(bytes(blocks)))
     blocks += read_data(radio, START_ADDR_SETTINGS, BUFFER_SIZE)
     _enter_programming_mode(radio, NUMBER_INITS_FOR_STOP)
-    LOG.info(util.hexprint(bytes(blocks)))
 
     return memmap.MemoryMapBytes(blocks)   
 
@@ -446,27 +444,36 @@ def do_upload(radio):
 
     LOG.debug("Uploading...")
 
+    mmap_pos = 0  # Track the current position in the memory map
+
     # First we have to form the buffer to send to the radio
-    for buff_idx, buff_addr in enumerate(range(START_ADDR_CHANNELS, END_ADDR_CHANNELS+BUFFER_SIZE, BUFFER_SIZE)):
+    for buff_idx, buff_addr in enumerate(
+        range(START_ADDR_CHANNELS, END_ADDR_CHANNELS + BUFFER_SIZE, BUFFER_SIZE)
+    ):
         _do_status(radio, buff_idx)
 
         # Addresses 0x49C00 and 0x4BC00 contain only 26 channels and length is 361 bytes
         if buff_addr in SHORT_ADDRS:
-            buffer_size = BUFFER_SHORT_SIZE
+            buffer_size = BUFFER_SHORT_SIZE-1
             LOG.debug("Buffer size is 0x361")
         else:
             buffer_size = BUFFER_SIZE
 
-        buffer = radio.get_mmap()[buff_idx * buffer_size: (buff_idx + 1 ) * buffer_size]
+        # Slice the memory map using the current position and buffer size
+        buffer = radio.get_mmap()[mmap_pos:mmap_pos + buffer_size]
 
-        # LOG.debug("writemem sent data addr=0x%4.4x len=0x%4.4x:\n%s" %
+        # Update the position in the memory map for the next iteration
+        mmap_pos += buffer_size
+
+        # LOG.debug("writemem channel data addr=0x%4.4x len=0x%4.4x:\n%s" %
         #     (buff_addr, len(buffer), util.hexprint(buffer)))
         write_data(radio, buffer, buff_addr)
 
     # Settings in a separate and non-consecutive address, thus cannot be handled in the loop
-    buffer_set = radio.get_mmap()[BLOCK_CHANNEL_SIZE*MAX_CHANNELS: BLOCK_CHANNEL_SIZE*MAX_CHANNELS + BUFFER_SIZE]    
+    buffer_set = radio.get_mmap()[BLOCK_CHANNEL_SIZE*(2*MAX_CHANNELS+2): BLOCK_CHANNEL_SIZE*(2*MAX_CHANNELS+2) + BUFFER_SIZE]    
+
     write_data(radio, buffer_set, START_ADDR_SETTINGS)
-    # LOG.debug("writemem sent data addr=0x%4.4x len=0x%4.4x:\n%s" %
+    # LOG.debug("writemem settings data addr=0x%4.4x len=0x%4.4x:\n%s" %
     #         (START_ADDR_SETTINGS, len(buffer_set), util.hexprint(buffer_set)))
     
     _enter_programming_mode(radio, NUMBER_INITS_FOR_STOP)
@@ -797,6 +804,8 @@ class rt752(chirp_common.CloneModeRadio):
 
     _upper = MAX_CHANNELS
 
+    _memstart = 0x0000
+
 
 
     # Return information about this radio's features, including
@@ -816,7 +825,6 @@ class rt752(chirp_common.CloneModeRadio):
         rf.valid_tmodes = ["", "Tone", "TSQL", "DTCS", "Cross"]
         rf.valid_cross_modes = ["Tone->Tone", "Tone->DTCS", "DTCS->Tone",
                                 "->Tone", "->DTCS", "DTCS->", "DTCS->DTCS"]
-        # rf.valid_special_chans = SPECIAL_CHANNELS
         rf.valid_characters = chirp_common.CHARSET_ASCII
         rf.valid_bands = self.VALID_BANDS
         rf.valid_duplexes = ["", "-", "+", "split", "off"]
@@ -824,9 +832,14 @@ class rt752(chirp_common.CloneModeRadio):
         rf.valid_name_length = 12
         rf.valid_power_levels = POWER_LEVELS
         rf.valid_tuning_steps = TUNING_STEPS
+        rf.valid_special_chans = list(SPECIALS.keys())
+        rf.has_sub_devices = self.VARIANT == ""
 
         return rf
- 
+    
+    def get_sub_devices(self):
+        return [rt752GroupA(self._mmap), rt752GroupB(self._mmap)]
+    
     # Do a download of the radio from the serial port
     def sync_in(self):
         try:
@@ -847,7 +860,8 @@ class rt752(chirp_common.CloneModeRadio):
 
     # Convert the raw byte array into a memory object structure
     def process_mmap(self):
-        self._memobj = bitwise.parse(MEM_FORMAT, self._mmap)
+        self._memobj = bitwise.parse(MEM_FORMAT % self._memstart, self._mmap)
+        LOG.info("Memory object created {}".format(self._memstart))
 
     # Return a raw representation of the memory object, which
     # is very helpful for development
@@ -856,16 +870,21 @@ class rt752(chirp_common.CloneModeRadio):
 
     def _get_mem(self, number):
         return self._memobj.memory[number]
-
+    
     def get_memory(self, number):
-        _mem = self._get_mem(number-1)
     
         # Create a high-level memory object to return to the UI
         mem = chirp_common.Memory()
 
-        mem.number = number
+        if isinstance(number, str):
+            mem.number = SPECIALS[number]
+            mem.extd_number = number
+        else:
+            mem.number = number
+        _mem = self._memobj.memory[mem.number - 1]
 
-        # LOG.info("Doing channel %i ",number)
+
+        
     
         # We'll consider any blank (i.e. 0 MHz frequency) to be empty
         if _mem.get_raw()[0] == 0xff:
@@ -891,6 +910,10 @@ class rt752(chirp_common.CloneModeRadio):
         chirp_common.split_tone_decode(mem, decode_tone(int(_mem.txtone)),
                                             decode_tone(int(_mem.rxtone)))
 
+        # LOG.info(decode_tone(int(_mem.txtone)))
+        # LOG.info(decode_tone(int(_mem.rxtone)))
+
+        
         # Split
         if int(mem.freq) == txfreq: 
             mem.duplex = ""
@@ -1002,6 +1025,7 @@ class rt752(chirp_common.CloneModeRadio):
     def set_memory(self, mem):
         # Get a low-level memory object mapped to the image
         _mem = self._get_mem(mem.number-1)
+        
 
         LOG.info("Memory Map")
         LOG.info(self.process_mmap())
@@ -1125,6 +1149,8 @@ class rt752(chirp_common.CloneModeRadio):
     def get_settings(self):
 
         _mem = self._memobj
+        LOG.info(((_mem)))
+
         info = RadioSettingGroup("info", "Radio Info")
         basic = RadioSettingGroup("basic", "Basic Settings")
         scan = RadioSettingGroup("scan", "Scan Settings")
@@ -1550,3 +1576,14 @@ class rt752(chirp_common.CloneModeRadio):
                 _settings.short_press_key2 = SHORTKEYASSIGN_LIST.index(str(element.value))
             if element.get_name() == "long_press_key2":
                 _settings.long_press_key2 = LONGKEYASSIGN_LIST.index(str(element.value))
+
+class rt752GroupA(rt752):
+    """RT-752 Group A subdevice"""
+    VARIANT = "A"
+    _memstart = 0x0
+
+
+class rt752GroupB(rt752):
+    """RT-752 Group B subdevice"""
+    VARIANT = "B"
+    _memstart = 8032 #8032
