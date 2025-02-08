@@ -386,11 +386,7 @@ def do_download(radio):
             LOG.error("No data received")
         for i in range(0, len(data), BLOCK_CHANNEL_SIZE):
             LOG.debug("Extracting from {}".format(i))
-            # Skip iteration if channel is VFO A or VFO B 
-            # if block_idx == BLOCK_NUMBER_VFO:
-            #     LOG.debug("Skipping block {} because is VFO A or VFO B channel.".format(block_idx))
-            #     block_idx += 1
-            #     continue
+            
             block = data[i:i+BLOCK_CHANNEL_SIZE]
             LOG.debug("Block size is: {}".format(len(block)))
             # Skip iteration if block size is less than expected
@@ -404,10 +400,10 @@ def do_download(radio):
                 block_idx += 1 
 
     # Setting data is 
-    LOG.info("Buffer: %i Block: %i",buf_idx, block_idx)
-    LOG.info(util.hexprint(bytes(blocks)))
     blocks += read_data(radio, START_ADDR_SETTINGS, BUFFER_SIZE)
     _enter_programming_mode(radio, NUMBER_INITS_FOR_STOP)
+    LOG.info("Buffer: %i Block: %i",buf_idx, block_idx)
+    LOG.info(util.hexprint(bytes(blocks)))
 
     return memmap.MemoryMapBytes(blocks)   
 
@@ -470,11 +466,13 @@ def do_upload(radio):
         write_data(radio, buffer, buff_addr)
 
     # Settings in a separate and non-consecutive address, thus cannot be handled in the loop
-    buffer_set = radio.get_mmap()[BLOCK_CHANNEL_SIZE*(2*MAX_CHANNELS+2): BLOCK_CHANNEL_SIZE*(2*MAX_CHANNELS+2) + BUFFER_SIZE]    
+    total_blocks = 2 * MAX_CHANNELS + 2
+    buffer_set = radio.get_mmap()[
+         BLOCK_CHANNEL_SIZE * total_blocks: BLOCK_CHANNEL_SIZE * total_blocks + BUFFER_SIZE]    
 
     write_data(radio, buffer_set, START_ADDR_SETTINGS)
-    # LOG.debug("writemem settings data addr=0x%4.4x len=0x%4.4x:\n%s" %
-    #         (START_ADDR_SETTINGS, len(buffer_set), util.hexprint(buffer_set)))
+    LOG.debug("writemem settings data addr=0x%4.4x len=0x%4.4x:\n%s" %
+            (START_ADDR_SETTINGS, len(buffer_set), util.hexprint(buffer_set)))
     
     _enter_programming_mode(radio, NUMBER_INITS_FOR_STOP)
 
@@ -1149,7 +1147,7 @@ class rt752(chirp_common.CloneModeRadio):
     def get_settings(self):
 
         _mem = self._memobj
-        LOG.info(((_mem)))
+        LOG.info(((_mem.settings)))
 
         info = RadioSettingGroup("info", "Radio Info")
         basic = RadioSettingGroup("basic", "Basic Settings")
