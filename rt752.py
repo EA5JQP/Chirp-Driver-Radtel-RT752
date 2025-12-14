@@ -36,7 +36,6 @@ LOG = logging.getLogger(__name__)
 
 MEM_FORMAT = """
 #seekto 0x%X;
-#printoffset "this_is_memory";
 
 struct {
     lbcd rxfreq[4];             // byte[4]  - RX Frequency in 10Hz units 32 bit unsigned little endian
@@ -80,7 +79,6 @@ struct {
     char name[12];              // byte[12] - ASCII channel name, unused characters should be null (0)
 } memory[251]; 
 
-#printoffset "this_is_settings";
 #seekto 16064;
 struct{
     u8 jump_freq;                   
@@ -115,7 +113,7 @@ struct{
     u8 an_power_on;                 
     u8 keylockmode;                     
     u8 keylocked;                     
-    u8 unknown;                     
+    u8 unknown_a;                     
     u8 step;                        
 
     #seekto 16114;
@@ -157,13 +155,13 @@ struct{
     u8 denoise;
 
     #seekto 16262;
-    u8 unknown:1,
-       unknown:1,
+    u8 unknown_b:1,
+       unknown_c:1,
        freq_sig_src:1,
-       unknown:1,
+       unknown_d:1,
        airband:1,
-       unknown:1,
-       unknown:1,
+       unknown_e:1,
+       unknown_f:1,
        freq_meas:1;
     u16 freq_hop_pwd;
     u8 freq_hop_ena; 
@@ -880,9 +878,6 @@ class rt752(chirp_common.CloneModeRadio):
         else:
             mem.number = number
         _mem = self._memobj.memory[mem.number - 1]
-
-
-        
     
         # We'll consider any blank (i.e. 0 MHz frequency) to be empty
         if _mem.get_raw()[0] == 0xff:
@@ -907,10 +902,6 @@ class rt752(chirp_common.CloneModeRadio):
 
         chirp_common.split_tone_decode(mem, decode_tone(int(_mem.txtone)),
                                             decode_tone(int(_mem.rxtone)))
-
-        # LOG.info(decode_tone(int(_mem.txtone)))
-        # LOG.info(decode_tone(int(_mem.rxtone)))
-
         
         # Split
         if int(mem.freq) == txfreq: 
@@ -1047,7 +1038,7 @@ class rt752(chirp_common.CloneModeRadio):
             _mem.signaltype_2tone = 0
             _mem.signaltype_dtmf = 0
             _mem.rev_freq = 0
-            _mem.unknown1
+            _mem.unknown1 = 0
             _mem.unknown3=0
             _mem.unknown4=0
             _mem.unknown5=0
@@ -1156,100 +1147,59 @@ class rt752(chirp_common.CloneModeRadio):
 
         group = RadioSettings(info, basic, scan, key)
 
+        def sanitize_string(value):
+            return "".join(c for c in str(value) if c in chirp_common.CHARSET_ASCII).rstrip()
+
         #################
         # Info Settings #
         #################
 
-        freq_a_start = int(_mem.settings.range_freq_a_start) / 10
-        rs = RadioSettingValueFloat(18, 580, freq_a_start, resolution= 0.00001, precision=1)
-        rset = RadioSetting("range_freq_a_start", "Frequency Range Start Group A", rs)
-        info.append(rset) 
+        freq_settings = [
+            ("range_freq_a_start", "Frequency Range Start Group A", _mem.settings.range_freq_a_start),
+            ("range_freq_a_end", "Frequency Range End Group A", _mem.settings.range_freq_a_end),
+            ("range_freq_b_start", "Frequency Range Start Group B", _mem.settings.range_freq_b_start),
+            ("range_freq_b_end", "Frequency Range End Group B", _mem.settings.range_freq_b_end),
+        ]
 
-        freq_a_end = int(_mem.settings.range_freq_a_end) / 10
-        rs = RadioSettingValueFloat(18, 580, freq_a_end, resolution= 0.00001, precision=1)
-        rset = RadioSetting("range_freq_a_end", "Frequency Range End Group A", rs)
-        info.append(rset) 
+        for setting, label, value in freq_settings:
+            rs = RadioSettingValueFloat(18, 580, int(value) / 10, resolution=0.00001, precision=1)
+            info.append(RadioSetting(setting, label, rs))
 
-        freq_b_start = int(_mem.settings.range_freq_b_start) / 10
-        rs = RadioSettingValueFloat(18, 580, freq_b_start, resolution= 0.00001, precision=1)
-        rset = RadioSetting("range_freq_b_start", "Frequency Range Start Group B", rs)
-        info.append(rset) 
+
+        msg_settings = [
+            ("pon_msg1", "Power On Message 1", _mem.settings.pon_msg1),
+            ("pon_msg2", "Power On Message 2", _mem.settings.pon_msg2),
+            ("pon_msg3", "Power On Message 3", _mem.settings.pon_msg3),
+            ("msg1", "Message 1", _mem.settings.msg1),
+            ("msg2", "Message 2", _mem.settings.msg2),
+        ]
     
-        freq_b_end = int(_mem.settings.range_freq_b_end) / 10
-        rs = RadioSettingValueFloat(18, 580, freq_b_end, resolution= 0.00001, precision=1)
-        rset = RadioSetting("range_freq_b_end", "Frequency Range End Group B", rs)
-        info.append(rset) 
-
-        def filter(s):
-            s_ = ""
-            for i in range(0, len(s)):
-                c = str(s[i])
-                s_ += (c if c in chirp_common.CHARSET_ASCII else "")
-            return s_
-
-        LOG.info(_mem.settings.pon_msg1)
-        LOG.info(filter(_mem.settings.pon_msg1))        
-        pon_msg1= ''.join(filter(_mem.settings.pon_msg1)).rstrip()
-        LOG.info(pon_msg1)
-        rs = RadioSettingValueString(0,16, pon_msg1, autopad= True)
-        rset = RadioSetting("pon_msg1", "Power On Message 1", rs)
-        info.append(rset)
-
-        pon_msg2= ''.join(filter(_mem.settings.pon_msg2)).rstrip()
-        rs = RadioSettingValueString(0,16, pon_msg2, autopad= True)
-        rset = RadioSetting("pon_msg2", "Power On Message 2", rs)
-        info.append(rset)
-
-        pon_msg3= ''.join(filter(_mem.settings.pon_msg3)).rstrip()
-        rs = RadioSettingValueString(0,16, pon_msg3, autopad= True)
-        rset = RadioSetting("pon_msg3", "Power On Message 3", rs)
-        info.append(rset)
-
-        msg1= ''.join(filter(_mem.settings.msg1)).rstrip()
-        rs = RadioSettingValueString(0,16, msg1, autopad= True)
-        rset = RadioSetting("msg1", "Message 1", rs)
-        info.append(rset)
-
-        msg2= ''.join(filter(_mem.settings.msg2)).rstrip()
-        rs = RadioSettingValueString(0,16, msg2, autopad= True)
-        rset = RadioSetting("msg2", "Message 2", rs)
-        info.append(rset)
+        for setting, label, value in msg_settings:
+            rs = RadioSettingValueString(0, 16, sanitize_string(value), autopad=True)
+            info.append(RadioSetting(setting, label, rs))
+    
 
         ##################
         # Basic Settings #
         ##################
 
-        rs = RadioSettingValueList(SQUELCH_LIST, current_index = _mem.settings.squelch)
-        rset = RadioSetting("squelch", "Squelch Level", rs)
-        basic.append(rset)   
+        basic_list_settings = [
+            ("squelch",         "Squelch Level",    SQUELCH_LIST, _mem.settings.squelch),
+            ("step",            "Step",             STEP_LIST, _mem.settings.step),
+            ("backlight",       "Backlight",        BACKLIGHT_LIST, _mem.settings.backlight),
+            ("group_a_mode",    "Group A Mode",     GROUPMODE_LIST, _mem.settings.group_a_mode),
+            ("group_b_mode",    "Group B Mode",     GROUPMODE_LIST, _mem.settings.group_b_mode),
+            ("tot",             "TOT",              TOT_LIST, _mem.settings.tot),
+            ("voice",           "Voice",            VOICE_LIST, _mem.settings.voice),
+            ("language",        "Language",         LANGUAGE_LIST, _mem.settings.language),
+        ]
 
-        rs = RadioSettingValueList(STEP_LIST, current_index = _mem.settings.step)
-        rset = RadioSetting("step", "Step", rs)
-        basic.append(rset)  
 
-        rs = RadioSettingValueList(BACKLIGHT_LIST, current_index = _mem.settings.backlight)
-        rset = RadioSetting("backlight", "Backlight", rs)
-        basic.append(rset)  
+        for setting, label, options, value in basic_list_settings:
+            rs = RadioSettingValueList(options, current_index=value)
+            basic.append(RadioSetting(setting, label, rs))
 
-        rs = RadioSettingValueList(GROUPMODE_LIST, current_index = _mem.settings.group_a_mode)
-        rset = RadioSetting("group_a_mode", "Group A Mode", rs)
-        basic.append(rset) 
 
-        rs = RadioSettingValueList(GROUPMODE_LIST, current_index = _mem.settings.group_b_mode)
-        rset = RadioSetting("group_b_mode", "Group B Mode", rs)
-        basic.append(rset) 
-
-        rs = RadioSettingValueList(TOT_LIST, current_index = _mem.settings.tot)
-        rset = RadioSetting("tot", "TOT", rs)
-        basic.append(rset) 
-
-        rs = RadioSettingValueList(LANGUAGE_LIST, current_index = _mem.settings.language)
-        rset = RadioSetting("language", "Language", rs)
-        basic.append(rset)
-
-        rs = RadioSettingValueList(VOICE_LIST, current_index = _mem.settings.voice)
-        rset = RadioSetting("voice", "Voice", rs)
-        basic.append(rset) 
 
         rs = RadioSettingValueList(BATTSAVE_LIST, current_index = _mem.settings.batt_save_ratio)
         rset = RadioSetting("batt_save_ratio", "Battery Save Ratio", rs)
@@ -1270,6 +1220,9 @@ class rt752(chirp_common.CloneModeRadio):
         rs = RadioSettingValueList(VOXDELAY_LIST, current_index = _mem.settings.vox_delay)
         rset = RadioSetting("vox_delay", "VOX Delay", rs)
         basic.append(rset) 
+
+
+
 
         rs = RadioSettingValueBoolean(bool(_mem.settings.tone))
         rset = RadioSetting("tone", "Tone", rs)
@@ -1408,7 +1361,8 @@ class rt752(chirp_common.CloneModeRadio):
         ##################
         # Key Assignment #
         ##################
-        rs = RadioSettingValueList(LONGPRESSTIME_LIST, current_index = _mem.settings.long_key_time - 5)
+        rs = RadioSettingValueList(LONGPRESSTIME_LIST, 
+            current_index = _mem.settings.long_key_time - 5)
         rset = RadioSetting("long_key_time", "Long Press Time", rs)
         key.append(rset) 
 

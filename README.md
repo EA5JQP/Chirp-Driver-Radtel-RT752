@@ -2,6 +2,8 @@
 
 WARNING: THIS MAY BRICK YOUR RADIO
 
+Tested with Chirp next-20251128
+
 Channels 1 - 250 are Group A
 Channels 251- 500 are Group B
 
